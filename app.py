@@ -9,7 +9,7 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1Wgm4xVidpndlEKLXXZUyl
 
 # Load credentials
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_file("/Users/webengage/PycharmProjects/MRR Geo Tren/venv/utils/cred.json", scopes=scope)
+creds = Credentials.from_service_account_file(".streamlit/secrets.toml", scopes=scope)
 client = gspread.authorize(creds)
 
 # Load sheet
