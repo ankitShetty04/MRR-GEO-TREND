@@ -20,37 +20,33 @@ worksheet = sheet.worksheet(SHEET_NAME)
 data = worksheet.get_all_records()
 
 # Convert to DataFrame
+# Convert to DataFrame
 df = pd.DataFrame(data)
 
 # Convert 'Value' column to numeric
 df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
+df = df.dropna(subset=['Value'])  # optional but recommended
 
-# Drop rows where Value is NaN (optional but recommended)
-df = df.dropna(subset=['Value'])
-
-# Ensure 'Month' is in datetime format and sort
-df['Month'] = pd.to_datetime(df['Month'])
+# Convert Month and Churn Month columns to datetime
+df['Month'] = pd.to_datetime(df['Month'], errors='coerce')
+df['Churn Month'] = pd.to_datetime(df['Churn Month'], errors='coerce')
 df = df.sort_values(['Name', 'Month'])
 
-# Ensure 'Month' is in datetime format and sort
-df['Month'] = pd.to_datetime(df['Month'])
-df = df.sort_values(['Name', 'Month'])
-
-# Filter selector - add "All" option
+# Region filter
 region_list = ['All'] + df['Region'].dropna().unique().tolist()
 selected_region = st.selectbox("Select Region", region_list)
 
-# Filter dataframe based on selection
 if selected_region == 'All':
     df_region = df.copy()
 else:
     df_region = df[df['Region'] == selected_region]
 
-# Function to calculate % change and classify expansion/contraction
+# Function to calculate MRR changes
 def get_mrr_changes(df):
     results = []
-    for name, group in df.groupby('Name'):
+    for ns_id, group in df.groupby('NS ID'):
         group = group.sort_values('Month')
+        name = group.iloc[0]['Name']
         if len(group) > 1:
             for i in range(1, len(group)):
                 prev_mrr = group.iloc[i - 1]['Value']
@@ -61,24 +57,23 @@ def get_mrr_changes(df):
                     pct_change = (curr_mrr - prev_mrr) / prev_mrr * 100
 
                 results.append({
+                    'NS ID': ns_id,
                     'Name': name,
                     'Month': group.iloc[i]['Month'],
                     'Prev_MRR': prev_mrr,
                     'Curr_MRR': curr_mrr,
                     'Pct_Change': pct_change,
                     'MRR_Change': curr_mrr - prev_mrr,
-                    'Churn Month': group.iloc[i].get('Churn Month', '-')
+                    'Churn Month': group.iloc[i].get('Churn Month', pd.NaT)
                 })
 
     return pd.DataFrame(results)
 
-# Calculate MRR changes for the selected region
 mrr_changes = get_mrr_changes(df_region)
 
-# Function to get change details with Churn Month condition
+# Expansion / Contraction
 def get_change_details(change_df, change_type):
-    # Only consider rows where Churn Month == '-'
-    valid_changes = change_df[change_df['Churn Month'] == '-']
+    valid_changes = change_df[change_df['Churn Month'].isna()]
 
     if change_type == 'expansion':
         filtered = valid_changes[valid_changes['Pct_Change'] > 0.9]
@@ -88,77 +83,100 @@ def get_change_details(change_df, change_type):
     if filtered.empty:
         return {'count': 0, 'customers': '-', 'mrr': 0}
 
+    id_to_name = filtered.drop_duplicates(subset='NS ID').set_index('NS ID')['Name'].to_dict()
+
     return {
-        'count': filtered['Name'].nunique(),
-        'customers': ", ".join(sorted(filtered['Name'].unique())),
+        'count': filtered['NS ID'].nunique(),
+        'customers': ", ".join(sorted(id_to_name.values())),
         'mrr': filtered['MRR_Change'].sum()
     }
 
-# Get unique months
+# Churn
+def get_churn_details(change_df, current_month):
+    churned = change_df[change_df['Churn Month'].dt.date == current_month.date()]
+
+    if churned.empty:
+        return {'count': 0, 'mrr': 0, 'customers': '-'}
+
+    id_to_name = churned.drop_duplicates(subset='NS ID').set_index('NS ID')['Name'].to_dict()
+
+    return {
+        'count': churned['NS ID'].nunique(),
+        'mrr': churned['Curr_MRR'].sum(),
+        'customers': ", ".join(sorted(id_to_name.values()))
+    }
+
+# Prepare summary
 months = sorted(df_region['Month'].unique())
 
-# Output header
-st.write("### MRR Expansion & Contraction Summary (±0.9% Threshold)")
+st.write("### MRR Expansion, Contraction & Churn Summary (±0.9% Threshold)")
 
-# Create a list to hold all rows for the table
 table_data = []
 
 for i, month in enumerate(months):
     if i == 0:
-        # Skip first month — no prior data available
         table_data.append({
             'Month': month.strftime('%Y-%m'),
-            'Expansion Count': '',
-            'Expansion Customers': '',
-            'Expansion MRR': '',
+            'Churn Count': '',
+            'Churn Customers': '',
+            'Churn MRR': '',
             'Contraction Count': '',
             'Contraction Customers': '',
-            'Contraction MRR': ''
+            'Contraction MRR': '',
+            'Expansion Count': '',
+            'Expansion Customers': '',
+            'Expansion MRR': ''
         })
         continue
 
     month_changes = mrr_changes[mrr_changes['Month'] == month]
 
-    # Get expansion and contraction details
     expansion = get_change_details(month_changes, 'expansion')
     contraction = get_change_details(month_changes, 'contraction')
+    churn = get_churn_details(month_changes, month)
 
     table_data.append({
         'Month': month.strftime('%Y-%m'),
-        'Expansion Count': expansion['count'],
-        'Expansion Customers': expansion['customers'],
-        'Expansion MRR': f"₹{expansion['mrr']:,.2f}",
+        'Churn Count': churn['count'],
+        'Churn Customers': churn['customers'],
+        'Churn MRR': f"₹{churn['mrr']:,.2f}",
         'Contraction Count': contraction['count'],
         'Contraction Customers': contraction['customers'],
-        'Contraction MRR': f"₹{contraction['mrr']:,.2f}"
+        'Contraction MRR': f"₹{contraction['mrr']:,.2f}",
+        'Expansion Count': expansion['count'],
+        'Expansion Customers': expansion['customers'],
+        'Expansion MRR': f"₹{expansion['mrr']:,.2f}"
     })
 
-# Convert to DataFrame
 summary_df = pd.DataFrame(table_data)
 
-# Reorder columns for better presentation
+# Reorder columns
 column_order = [
     'Month',
+    'Churn Count', 'Churn Customers', 'Churn MRR',
     'Contraction Count', 'Contraction Customers', 'Contraction MRR',
     'Expansion Count', 'Expansion Customers', 'Expansion MRR'
 ]
 summary_df = summary_df[column_order]
 
-# Display as table with improved formatting
+# Display table
 st.dataframe(
     summary_df,
     use_container_width=True,
     column_config={
         'Month': st.column_config.TextColumn("Month", width="small"),
-        'Expansion Count': st.column_config.NumberColumn("Expansion Count", width="small"),
-        'Expansion Customers': st.column_config.TextColumn("Expansion Customers"),
-        'Expansion MRR': st.column_config.TextColumn("Expansion MRR", width="small"),
+        'Churn Count': st.column_config.NumberColumn("Churn Count", width="small"),
+        'Churn Customers': st.column_config.TextColumn("Churn Customers"),
+        'Churn MRR': st.column_config.TextColumn("Churn MRR", width="small"),
         'Contraction Count': st.column_config.NumberColumn("Contraction Count", width="small"),
         'Contraction Customers': st.column_config.TextColumn("Contraction Customers"),
-        'Contraction MRR': st.column_config.TextColumn("Contraction MRR", width="small")
+        'Contraction MRR': st.column_config.TextColumn("Contraction MRR", width="small"),
+        'Expansion Count': st.column_config.NumberColumn("Expansion Count", width="small"),
+        'Expansion Customers': st.column_config.TextColumn("Expansion Customers"),
+        'Expansion MRR': st.column_config.TextColumn("Expansion MRR", width="small")
     }
 )
 
-# Add some visual separation
+# Footer
 st.markdown("---")
-st.caption("Note: Expansion = MRR increase > 0.9%, Contraction = MRR decrease < -0.9%. First month is excluded.")
+st.caption("Note: Churn = Customers with Churn Month == Selected Month. Expansion = MRR ↑ > 0.9%, Contraction = MRR ↓ < -0.9%. First month excluded.")
