@@ -109,7 +109,7 @@ def get_churn_details(change_df, current_month):
 # Prepare summary
 months = sorted(df_region['Month'].unique())
 
-st.write("### MRR Expansion, Contraction & Churn Summary (±0.9% Threshold)")
+st.write("### MRR GEO Trend (±0.9% Threshold)")
 
 table_data = []
 
