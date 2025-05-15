@@ -25,7 +25,7 @@ data = worksheet.get_all_records()
 df = pd.DataFrame(data)
 
 # Convert 'Value' column to numeric
-df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
+df['Sub MRR'] = pd.to_numeric(df['Sub MRR'], errors='coerce')
 df['1st Sub MRR'] = pd.to_numeric(df['1st Sub MRR'], errors='coerce')
 
 df = df.dropna(subset=['Value'])  # optional but recommended
@@ -58,8 +58,8 @@ def get_mrr_changes(df):
         name = group.iloc[0]['Name']
         if len(group) > 1:
             for i in range(1, len(group)):
-                prev_mrr = group.iloc[i - 1]['Value']
-                curr_mrr = group.iloc[i]['Value']
+                prev_mrr = group.iloc[i - 1]['Sub MRR']
+                curr_mrr = group.iloc[i]['Sub MRR']
                 if prev_mrr == 0:
                     pct_change = 0
                 else:
@@ -152,8 +152,8 @@ def get_closing_metrics(df, month):
     month_df = closing_df[closing_df['Month'] == month]
 
     closing_cx_count = month_df['NS ID'].nunique()
-    closing_cx_mrr_count = month_df[month_df['Value'] > 0]['NS ID'].nunique()
-    closing_mrr = month_df.groupby('NS ID')['Value'].first().sum()
+    closing_cx_mrr_count = month_df[month_df['Sub MRR'] > 0]['NS ID'].nunique()
+    closing_mrr = month_df.groupby('NS ID')['Sub MRR'].first().sum()
 
     return {
         'closing_cx_count': closing_cx_count,
