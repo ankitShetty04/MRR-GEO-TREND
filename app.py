@@ -28,7 +28,7 @@ df = pd.DataFrame(data)
 df['Sub MRR'] = pd.to_numeric(df['Sub MRR'], errors='coerce')
 df['1st Sub MRR'] = pd.to_numeric(df['1st Sub MRR'], errors='coerce')
 
-df = df.dropna(subset=['Value'])  # optional but recommended
+df = df.dropna(subset=['Sub MRR'])  # optional but recommended
 
 # Convert Month and Churn Month columns to datetime
 df['Month'] = pd.to_datetime(df['Month'], errors='coerce')
