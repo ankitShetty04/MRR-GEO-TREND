@@ -4,6 +4,8 @@ import gspread
 import json
 from google.oauth2.service_account import Credentials
 
+st.set_page_config(layout="wide")
+
 # Define Google Sheet variables
 SHEET_NAME = "Subscription"
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1Wgm4xVidpndlEKLXXZUylNGp0uJx_m11DBePOCMAz88/"
@@ -15,21 +17,28 @@ creds = Credentials.from_service_account_info(service_account_info, scopes=scope
 client = gspread.authorize(creds)
 
 # Load sheet
-sheet = client.open_by_url(SPREADSHEET_URL)
 worksheet = sheet.worksheet(SHEET_NAME)
+sheet = client.open_by_url(SPREADSHEET_URL)
 data = worksheet.get_all_records()
 
-# Convert to DataFrame
 # Convert to DataFrame
 df = pd.DataFrame(data)
 
 # Convert 'Value' column to numeric
 df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
+df['1st Sub MRR'] = pd.to_numeric(df['1st Sub MRR'], errors='coerce')
+
 df = df.dropna(subset=['Value'])  # optional but recommended
 
 # Convert Month and Churn Month columns to datetime
 df['Month'] = pd.to_datetime(df['Month'], errors='coerce')
 df['Churn Month'] = pd.to_datetime(df['Churn Month'], errors='coerce')
+df['Churn Month MRR'] = pd.to_numeric(df['Churn Month MRR'], errors='coerce')
+
+
+# Convert Month and 1st Sub Month columns to datetime
+df['1st Sub Month'] = pd.to_datetime(df['1st Sub Month'],errors='coerce')
+
 df = df.sort_values(['Name', 'Month'])
 
 # Region filter
@@ -92,19 +101,66 @@ def get_change_details(change_df, change_type):
     }
 
 # Churn
-def get_churn_details(change_df, current_month):
-    churned = change_df[change_df['Churn Month'].dt.date == current_month.date()]
+def get_churn_details(df, current_month):
+    churned = df[df['Churn Month'].notna() & (df['Churn Month'].dt.date == current_month.date())]
 
     if churned.empty:
         return {'count': 0, 'mrr': 0, 'customers': '-'}
 
+    # Ensure 'Churn Month MRR' is numeric
+    churned['Churn Month MRR'] = pd.to_numeric(churned['Churn Month MRR'], errors='coerce')
+
     id_to_name = churned.drop_duplicates(subset='NS ID').set_index('NS ID')['Name'].to_dict()
+    mrr_sum = churned.groupby('NS ID')['Churn Month MRR'].first().sum()
 
     return {
         'count': churned['NS ID'].nunique(),
-        'mrr': churned['Curr_MRR'].sum(),
+        'mrr': mrr_sum,
         'customers': ", ".join(sorted(id_to_name.values()))
     }
+
+
+#1st Sub
+def get_first_sub_details(df, month):
+    first_subs = df[df['1st Sub Month'].notna() & (df['1st Sub Month'].dt.date == month.date())]
+
+    if first_subs.empty:
+        return {'count': 0, 'mrr': 0, 'customers': '-'}
+
+    id_to_name = first_subs.drop_duplicates(subset='NS ID').set_index('NS ID')['Name'].to_dict()
+
+    # Use '1st Sub MRR' instead of 'Value'
+    mrr_sum = first_subs.groupby('NS ID')['1st Sub MRR'].first().sum()
+
+    return {
+        'count': first_subs['NS ID'].nunique(),
+        'mrr': mrr_sum,
+        'customers': ", ".join(sorted(id_to_name.values()))
+    }
+
+
+def get_closing_metrics(df, month):
+    # Customers who are active in the current month:
+    # - Not churned yet or churned after this month
+    condition_churn = (df['Churn Month'].isna()) | (df['Churn Month'] > month)
+
+    # - Subscribed on or before this month
+    condition_sub = (df['1st Sub Month'].isna()) | (df['1st Sub Month'] <= month)
+
+    # Filter to active customers for this specific month
+    closing_df = df[condition_churn & condition_sub]
+    month_df = closing_df[closing_df['Month'] == month]
+
+    closing_cx_count = month_df['NS ID'].nunique()
+    closing_cx_mrr_count = month_df[month_df['Value'] > 0]['NS ID'].nunique()
+    closing_mrr = month_df.groupby('NS ID')['Value'].first().sum()
+
+    return {
+        'closing_cx_count': closing_cx_count,
+        'closing_cx_mrr_count': closing_cx_mrr_count,
+        'closing_mrr': closing_mrr
+    }
+
 
 # Prepare summary
 months = sorted(df_region['Month'].unique())
@@ -115,17 +171,27 @@ table_data = []
 
 for i, month in enumerate(months):
     if i == 0:
+        month_changes = mrr_changes[mrr_changes['Month'] == month]
+        churn = get_churn_details(df_region, month)
+        first_sub = get_first_sub_details(df_region, month)
+
         table_data.append({
             'Month': month.strftime('%Y-%m'),
-            'Churn Count': '',
-            'Churn Customers': '',
-            'Churn MRR': '',
+            'Churn Count': churn['count'],
+            'Churn Customers': churn['customers'],
+            'Churn MRR': f"₹{churn['mrr']:,.2f}",
             'Contraction Count': '',
             'Contraction Customers': '',
             'Contraction MRR': '',
             'Expansion Count': '',
             'Expansion Customers': '',
-            'Expansion MRR': ''
+            'Expansion MRR': '',
+            '1st Sub Count': first_sub['count'],
+            '1st Sub Customers': first_sub['customers'],
+            '1st Sub MRR': f"₹{first_sub['mrr']:,.2f}",
+            'Closing Cx Count': '',
+            'Closing Cx MRR Count': '',
+            'Closing MRR': ''
         })
         continue
 
@@ -133,7 +199,9 @@ for i, month in enumerate(months):
 
     expansion = get_change_details(month_changes, 'expansion')
     contraction = get_change_details(month_changes, 'contraction')
-    churn = get_churn_details(month_changes, month)
+    first_sub = get_first_sub_details(df_region, month)
+    churn = get_churn_details(df_region, month)
+    closing = get_closing_metrics(df_region, month)
 
     table_data.append({
         'Month': month.strftime('%Y-%m'),
@@ -145,8 +213,15 @@ for i, month in enumerate(months):
         'Contraction MRR': f"₹{contraction['mrr']:,.2f}",
         'Expansion Count': expansion['count'],
         'Expansion Customers': expansion['customers'],
-        'Expansion MRR': f"₹{expansion['mrr']:,.2f}"
+        'Expansion MRR': f"₹{expansion['mrr']:,.2f}",
+        '1st Sub Count': first_sub['count'],
+        '1st Sub Customers': first_sub['customers'],
+        '1st Sub MRR': f"₹{first_sub['mrr']:,.2f}",
+        'Closing Cx Count': closing['closing_cx_count'],
+        'Closing Cx MRR Count': closing['closing_cx_mrr_count'],
+        'Closing MRR': f"₹{closing['closing_mrr']:,.2f}"
     })
+
 
 summary_df = pd.DataFrame(table_data)
 
@@ -155,8 +230,11 @@ column_order = [
     'Month',
     'Churn Count', 'Churn Customers', 'Churn MRR',
     'Contraction Count', 'Contraction Customers', 'Contraction MRR',
-    'Expansion Count', 'Expansion Customers', 'Expansion MRR'
+    'Expansion Count', 'Expansion Customers', 'Expansion MRR',
+    '1st Sub Count', '1st Sub Customers', '1st Sub MRR',
+    'Closing Cx Count', 'Closing Cx MRR Count', 'Closing MRR'
 ]
+
 summary_df = summary_df[column_order]
 
 # Display table
@@ -165,15 +243,27 @@ st.dataframe(
     use_container_width=True,
     column_config={
         'Month': st.column_config.TextColumn("Month", width="small"),
-        'Churn Count': st.column_config.NumberColumn("Churn Count", width="small"),
-        'Churn Customers': st.column_config.TextColumn("Churn Customers"),
-        'Churn MRR': st.column_config.TextColumn("Churn MRR", width="small"),
-        'Contraction Count': st.column_config.NumberColumn("Contraction Count", width="small"),
+
+        'Churn Count': st.column_config.NumberColumn("Churn Count", width="tiny"),
+        'Churn Customers': st.column_config.TextColumn("Churn Customers"),  # keep default for wrapping
+        'Churn MRR': st.column_config.TextColumn("Churn MRR", width="tiny"),
+
+        'Contraction Count': st.column_config.NumberColumn("Contraction Count", width="tiny"),
         'Contraction Customers': st.column_config.TextColumn("Contraction Customers"),
-        'Contraction MRR': st.column_config.TextColumn("Contraction MRR", width="small"),
-        'Expansion Count': st.column_config.NumberColumn("Expansion Count", width="small"),
+        'Contraction MRR': st.column_config.TextColumn("Contraction MRR", width="tiny"),
+
+        'Expansion Count': st.column_config.NumberColumn("Expansion Count", width="tiny"),
         'Expansion Customers': st.column_config.TextColumn("Expansion Customers"),
-        'Expansion MRR': st.column_config.TextColumn("Expansion MRR", width="small")
+        'Expansion MRR': st.column_config.TextColumn("Expansion MRR", width="tiny"),
+
+        '1st Sub Count': st.column_config.NumberColumn("1st Sub Count", width="tiny"),
+        '1st Sub Customers': st.column_config.TextColumn("1st Sub Customers"),
+        '1st Sub MRR': st.column_config.TextColumn("1st Sub MRR", width="tiny"),
+
+        'Closing Cx Count': st.column_config.NumberColumn("Closing Cx Count", width="tiny"),
+        'Closing Cx MRR Count': st.column_config.NumberColumn("Closing Cx MRR Count", width="tiny"),
+        'Closing MRR': st.column_config.TextColumn("Closing MRR", width="tiny"),
+
     }
 )
 
