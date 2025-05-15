@@ -17,8 +17,8 @@ creds = Credentials.from_service_account_info(service_account_info, scopes=scope
 client = gspread.authorize(creds)
 
 # Load sheet
-worksheet = sheet.worksheet(SHEET_NAME)
 sheet = client.open_by_url(SPREADSHEET_URL)
+worksheet = sheet.worksheet(SHEET_NAME)
 data = worksheet.get_all_records()
 
 # Convert to DataFrame
