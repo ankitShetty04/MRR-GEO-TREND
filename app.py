@@ -272,6 +272,7 @@ st.dataframe(
 
 st.markdown("---")
 
+st.markdown("### Sub x Cons Trend by Region")
 # Ensure Cons MRR is numeric
 df_region['Cons MRR'] = pd.to_numeric(df_region.get('Cons MRR'), errors='coerce')
 # Group by Month and aggregate Sub MRR & Cons MRR
