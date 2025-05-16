@@ -194,7 +194,6 @@ if i == 0:
         'Closing Cx MRR Count': '',
         'Closing MRR': ''
     })
-    
     continue
 
 
