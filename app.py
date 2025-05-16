@@ -171,31 +171,31 @@ st.caption("Note: Churn = Customers with Churn Month == Selected Month. Expansio
 
 table_data = []
 
-if i == 0:
-    month_changes = mrr_changes[mrr_changes['Month'] == month]
-    churn = get_churn_details(df_region, month)
-    first_sub = get_first_sub_details(df_region, month)
+for i, month in enumerate(months):
+    if i == 0:
+        month_changes = mrr_changes[mrr_changes['Month'] == month]
+        churn = get_churn_details(df_region, month)
+        first_sub = get_first_sub_details(df_region, month)
 
-    table_data.append({
-        'Month': month.strftime('%Y-%m'),
-        'Churn Count': churn['count'],
-        'Churn Customers': churn['customers'],
-        'Churn MRR': f"₹{churn['mrr']:,.2f}",
-        'Contraction Count': '',
-        'Contraction Customers': '',
-        'Contraction MRR': '',
-        'Expansion Count': '',
-        'Expansion Customers': '',
-        'Expansion MRR': '',
-        '1st Sub Count': first_sub['count'],
-        '1st Sub Customers': first_sub['customers'],
-        '1st Sub MRR': f"₹{first_sub['mrr']:,.2f}",
-        'Closing Cx Count': '',
-        'Closing Cx MRR Count': '',
-        'Closing MRR': ''
-    })
-    continue
-
+        table_data.append({
+            'Month': month.strftime('%Y-%m'),
+            'Churn Count': churn['count'],
+            'Churn Customers': churn['customers'],
+            'Churn MRR': f"₹{churn['mrr']:,.2f}",
+            'Contraction Count': '',
+            'Contraction Customers': '',
+            'Contraction MRR': '',
+            'Expansion Count': '',
+            'Expansion Customers': '',
+            'Expansion MRR': '',
+            '1st Sub Count': first_sub['count'],
+            '1st Sub Customers': first_sub['customers'],
+            '1st Sub MRR': f"₹{first_sub['mrr']:,.2f}",
+            'Closing Cx Count': '',
+            'Closing Cx MRR Count': '',
+            'Closing MRR': ''
+        })
+        continue
 
     month_changes = mrr_changes[mrr_changes['Month'] == month]
 
