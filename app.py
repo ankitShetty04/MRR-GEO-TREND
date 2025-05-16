@@ -166,6 +166,7 @@ def get_closing_metrics(df, month):
 months = sorted(df_region['Month'].unique())
 
 st.write("### MRR GEO Trend (±0.9% Threshold)")
+st.caption("Note: Churn = Customers with Churn Month == Selected Month. Expansion = MRR ↑ > 0.9%, Contraction = MRR ↓ < -0.9%. First month excluded.")
 
 table_data = []
 
@@ -267,6 +268,122 @@ st.dataframe(
     }
 )
 
-# Footer
+
 st.markdown("---")
-st.caption("Note: Churn = Customers with Churn Month == Selected Month. Expansion = MRR ↑ > 0.9%, Contraction = MRR ↓ < -0.9%. First month excluded.")
+
+# Ensure Cons MRR is numeric
+df_region['Cons MRR'] = pd.to_numeric(df_region.get('Cons MRR'), errors='coerce')
+# Group by Month and aggregate Sub MRR & Cons MRR
+trend_df = df_region.groupby('Month', as_index=False).agg({
+    'Sub MRR': 'sum',
+    'Cons MRR': 'sum'
+}).sort_values('Month')
+
+
+# Create plotly figure
+fig = go.Figure()
+
+fig.add_trace(go.Scatter(
+    x=trend_df['Month'],
+    y=trend_df['Sub MRR'],
+    mode='lines+markers+text',
+    name='Sub MRR',
+    line=dict(color='green', width=2),
+    marker=dict(size=6),
+    text=(trend_df['Sub MRR'] / 1e7).round(1),  # Value in crores
+    textposition='top center',
+    texttemplate='%{text}',
+    hovertemplate='Month: %{x|%b-%Y}<br>Sub MRR: ₹%{y:,.0f}<extra></extra>'
+))
+
+fig.add_trace(go.Scatter(
+    x=trend_df['Month'],
+    y=trend_df['Cons MRR'],
+    mode='lines+markers+text',
+    name='Cons MRR',
+    line=dict(color='darkorange', width=2, dash='dot'),
+    marker=dict(size=6),
+    text=(trend_df['Cons MRR'] / 1e7).round(1),  # Value in crores
+    textposition='top center',
+    texttemplate='%{text}',
+    hovertemplate='Month: %{x|%b-%Y}<br>Cons MRR: ₹%{y:,.0f}<extra></extra>'
+))
+
+
+fig.update_layout(
+    title=f"SUB x Cons Trend by Month ({selected_region} Region)",
+    xaxis_title="Month",
+    yaxis_title="MRR (₹)",
+    xaxis=dict(tickformat="%b-%Y"),
+    hovermode='x unified',
+    template='plotly_white',
+    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+    margin=dict(l=20, r=20, t=60, b=20)
+)
+
+# Show chart
+st.plotly_chart(fig, use_container_width=True)
+
+
+# ---- Director AM based Chart ----
+st.markdown("### Sub x Cons Trend by Director AM (Independent of Region Filter)")
+
+# Get all unique Director AMs
+all_directors = df['Director AM'].dropna().unique().tolist()
+selected_director = st.selectbox("Select Director AM", all_directors, key="director_am_selector")
+
+# Filter original df (not region-filtered one)
+df_director = df[df['Director AM'] == selected_director]
+
+# Group by Month and aggregate Sub MRR & Cons MRR
+trend_director_df = df_director.groupby('Month', as_index=False).agg({
+    'Sub MRR': 'sum',
+    'Cons MRR': 'sum'
+}).sort_values('Month')
+
+# Create a second chart for Director AM
+fig_director = go.Figure()
+
+fig_director.add_trace(go.Scatter(
+    x=trend_df['Month'],
+    y=trend_df['Sub MRR'],
+    mode='lines+markers+text',
+    name='Sub MRR',
+    line=dict(color='green', width=2),
+    marker=dict(size=6),
+    text=(trend_df['Sub MRR'] / 1e7).round(1),  # Value in crores
+    textposition='top center',
+    texttemplate='%{text}',
+    hovertemplate='Month: %{x|%b-%Y}<br>Sub MRR: ₹%{y:,.0f}<extra></extra>'
+))
+
+
+fig_director.add_trace(go.Scatter(
+    x=trend_df['Month'],
+    y=trend_df['Cons MRR'],
+    mode='lines+markers+text',
+    name='Cons MRR',
+    line=dict(color='darkorange', width=2, dash='dot'),
+    marker=dict(size=6),
+    text=(trend_df['Cons MRR'] / 1e7).round(1),  # Value in crores
+    textposition='top center',
+    texttemplate='%{text}',
+    hovertemplate='Month: %{x|%b-%Y}<br>Cons MRR: ₹%{y:,.0f}<extra></extra>'
+))
+
+
+fig_director.update_layout(
+    title=f"MRR Trend by Month for Director AM: {selected_director}",
+    xaxis_title="Month",
+    yaxis_title="MRR (₹)",
+    xaxis=dict(tickformat="%b-%Y"),
+    hovermode='x unified',
+    template='plotly_white',
+    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+    margin=dict(l=20, r=20, t=60, b=20)
+)
+
+st.plotly_chart(fig_director, use_container_width=True)
+
+
+# Footer
