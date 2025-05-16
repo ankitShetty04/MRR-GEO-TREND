@@ -194,7 +194,8 @@ if i == 0:
         'Closing Cx MRR Count': '',
         'Closing MRR': ''
     })
-continue
+    
+    continue
 
 
     month_changes = mrr_changes[mrr_changes['Month'] == month]
