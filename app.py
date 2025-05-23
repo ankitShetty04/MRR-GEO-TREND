@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 import plotly.graph_objects as go
 import json
+import seaborn as sns
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
@@ -25,9 +26,12 @@ data = worksheet.get_all_records()
 # Convert to DataFrame
 df = pd.DataFrame(data)
 
-# Convert 'Value' column to numeric
+
+# Convert 'Sub MRR' column to numeric
 df['Sub MRR'] = pd.to_numeric(df['Sub MRR'], errors='coerce')
 df['1st Sub MRR'] = pd.to_numeric(df['1st Sub MRR'], errors='coerce')
+df['Cons MRR'] = pd.to_numeric(df['Cons MRR'], errors='coerce')
+
 
 df = df.dropna(subset=['Sub MRR'])  # optional but recommended
 
@@ -46,11 +50,25 @@ df = df.sort_values(['Name', 'Month'])
 region_list = ['All'] + df['Region'].dropna().unique().tolist()
 selected_region = st.selectbox("Select Region", region_list)
 
+# Region-wise Category filter - dynamic based on Region selection
 if selected_region == 'All':
-    df_region = df.copy()
+    category_list = ['All'] + df['Region-wise Category'].dropna().unique().tolist()
 else:
-    df_region = df[df['Region'] == selected_region]
+    available_categories = df[df['Region'] == selected_region]['Region-wise Category'].dropna().unique().tolist()
+    category_list = ['All'] + available_categories
 
+selected_category = st.selectbox("Select Region-wise Category", category_list)
+
+# Apply both filters to the data
+if selected_region == 'All' and selected_category == 'All':
+    df_filtered = df.copy()
+elif selected_region == 'All':
+    df_filtered = df[df['Region-wise Category'] == selected_category]
+elif selected_category == 'All':
+    df_filtered = df[df['Region'] == selected_region]
+else:
+    df_filtered = df[(df['Region'] == selected_region) &
+                     (df['Region-wise Category'] == selected_category)]
 # Function to calculate MRR changes
 def get_mrr_changes(df):
     results = []
@@ -79,7 +97,7 @@ def get_mrr_changes(df):
 
     return pd.DataFrame(results)
 
-mrr_changes = get_mrr_changes(df_region)
+mrr_changes = get_mrr_changes(df_filtered)
 
 # Expansion / Contraction
 def get_change_details(change_df, change_type):
@@ -162,9 +180,21 @@ def get_closing_metrics(df, month):
         'closing_mrr': closing_mrr
     }
 
+def get_consumables_cx_count(df, month):
+    """Count customers with Cons MRR > 0 for the given month"""
+    active_in_month = df[df['Month'] == month]
+    consumables_cx = active_in_month[active_in_month['Cons MRR'] > 0]
+    return consumables_cx['NS ID'].nunique()
+
+def get_consumables_mrr(df, month):
+    """Sum of all Cons MRR for the given month"""
+    active_in_month = df[df['Month'] == month]
+    return active_in_month['Cons MRR'].sum()
+
+
 
 # Prepare summary
-months = sorted(df_region['Month'].unique())
+months = sorted(df_filtered['Month'].unique())
 
 st.write("### MRR GEO Trend (±0.9% Threshold)")
 st.caption("Note: Churn = Customers with Churn Month == Selected Month. Expansion = MRR ↑ > 0.9%, Contraction = MRR ↓ < -0.9%. First month excluded.")
@@ -174,11 +204,22 @@ table_data = []
 for i, month in enumerate(months):
     if i == 0:
         month_changes = mrr_changes[mrr_changes['Month'] == month]
-        churn = get_churn_details(df_region, month)
-        first_sub = get_first_sub_details(df_region, month)
+        churn = get_churn_details(df_filtered, month)
+        first_sub = get_first_sub_details(df_filtered, month)
+        Close_sec = get_closing_metrics(df_filtered, month)
+        Cons_mrr_Cx = get_consumables_cx_count(df_filtered,month)
+        Cons_mrr = get_consumables_mrr(df_filtered, month)
+        #Opening Cx count
+        closing = get_closing_metrics(df_filtered, month)
+        opening_cx_count = closing['closing_cx_count'] + churn['count'] - first_sub['count']
+        opening_cx_mrr_count = closing['closing_cx_mrr_count'] + churn['count'] - first_sub['count']
+        opening_cx_mrr = closing['closing_mrr'] + churn['mrr'] - first_sub['mrr']
 
         table_data.append({
             'Month': month.strftime('%Y-%m'),
+            'Opening Cx Count': opening_cx_count,
+            'Opening Cx MRR Count': opening_cx_mrr_count,
+            'Opening Cx MRR': f"₹{opening_cx_mrr:,.2f}",
             'Churn Count': churn['count'],
             'Churn Customers': churn['customers'],
             'Churn MRR': f"₹{churn['mrr']:,.2f}",
@@ -191,9 +232,12 @@ for i, month in enumerate(months):
             '1st Sub Count': first_sub['count'],
             '1st Sub Customers': first_sub['customers'],
             '1st Sub MRR': f"₹{first_sub['mrr']:,.2f}",
-            'Closing Cx Count': '',
-            'Closing Cx MRR Count': '',
-            'Closing MRR': ''
+            'Closing Cx Count': Close_sec['closing_cx_count'],
+            'Closing Cx MRR Count': Close_sec['closing_cx_mrr_count'],
+            'Closing MRR': f"₹{Close_sec['closing_mrr']:,.2f}",
+            'Consumables Cx Count': Cons_mrr_Cx,
+            'Consumables MRR': f"₹{Cons_mrr:,.2f}",
+            'Total MRR': f"₹{Close_sec['closing_mrr'] + Cons_mrr:,.2f}"
         })
         continue
 
@@ -201,12 +245,22 @@ for i, month in enumerate(months):
 
     expansion = get_change_details(month_changes, 'expansion')
     contraction = get_change_details(month_changes, 'contraction')
-    first_sub = get_first_sub_details(df_region, month)
-    churn = get_churn_details(df_region, month)
-    closing = get_closing_metrics(df_region, month)
+    first_sub = get_first_sub_details(df_filtered, month)
+    churn = get_churn_details(df_filtered, month)
+    closing = get_closing_metrics(df_filtered, month)
+    # Get consumables metrics using the new functions
+    consumables_cx_count = get_consumables_cx_count(df_filtered, month)
+    consumables_mrr = get_consumables_mrr(df_filtered, month)
+    #Get Cx Opening
+    opening_cx_count = closing['closing_cx_count'] + churn['count'] - first_sub['count']
+    opening_cx_mrr_count = closing['closing_cx_mrr_count'] + churn['count'] - first_sub['count']
+    opening_cx_mrr = closing['closing_mrr'] + churn['mrr'] - first_sub['mrr']
 
     table_data.append({
         'Month': month.strftime('%Y-%m'),
+        'Opening Cx Count': opening_cx_count,
+        'Opening Cx MRR Count': opening_cx_mrr_count,
+        'Opening Cx MRR': f"₹{opening_cx_mrr:,.2f}",
         'Churn Count': churn['count'],
         'Churn Customers': churn['customers'],
         'Churn MRR': f"₹{churn['mrr']:,.2f}",
@@ -221,20 +275,24 @@ for i, month in enumerate(months):
         '1st Sub MRR': f"₹{first_sub['mrr']:,.2f}",
         'Closing Cx Count': closing['closing_cx_count'],
         'Closing Cx MRR Count': closing['closing_cx_mrr_count'],
-        'Closing MRR': f"₹{closing['closing_mrr']:,.2f}"
+        'Closing MRR': f"₹{closing['closing_mrr']:,.2f}",
+        'Consumables Cx Count': consumables_cx_count,
+        'Consumables MRR': f"₹{consumables_mrr:,.2f}",
+        'Total MRR': f"₹{closing['closing_mrr'] + consumables_mrr:,.2f}"
     })
+
 
 
 summary_df = pd.DataFrame(table_data)
 
 # Reorder columns
 column_order = [
-    'Month',
+    'Month', 'Opening Cx Count', 'Opening Cx MRR Count', 'Opening Cx MRR',
     'Churn Count', 'Churn Customers', 'Churn MRR',
     'Contraction Count', 'Contraction Customers', 'Contraction MRR',
     'Expansion Count', 'Expansion Customers', 'Expansion MRR',
     '1st Sub Count', '1st Sub Customers', '1st Sub MRR',
-    'Closing Cx Count', 'Closing Cx MRR Count', 'Closing MRR'
+    'Closing Cx Count', 'Closing Cx MRR Count', 'Closing MRR', 'Consumables Cx Count', 'Consumables MRR','Total MRR'
 ]
 
 summary_df = summary_df[column_order]
@@ -245,6 +303,10 @@ st.dataframe(
     use_container_width=True,
     column_config={
         'Month': st.column_config.TextColumn("Month", width="small"),
+
+        'Opening Cx Count': st.column_config.NumberColumn("Opening Cx Count", width="tiny"),
+        'Opening Cx MRR Count': st.column_config.NumberColumn("Opening Cx with MRR", width="tiny"),
+        'Opening Cx MRR': st.column_config.TextColumn("Opening Cx MRR", width="tiny"),
 
         'Churn Count': st.column_config.NumberColumn("Churn Count", width="tiny"),
         'Churn Customers': st.column_config.TextColumn("Churn Customers"),  # keep default for wrapping
@@ -266,17 +328,19 @@ st.dataframe(
         'Closing Cx MRR Count': st.column_config.NumberColumn("Closing Cx MRR Count", width="tiny"),
         'Closing MRR': st.column_config.TextColumn("Closing MRR", width="tiny"),
 
+        'Consumables Cx Count': st.column_config.NumberColumn("Consumables Cx",width="tiny"),
+        'Consumables MRR': st.column_config.TextColumn("Consumables MRR", width="tiny")
+
+
     }
 )
 
-
 st.markdown("---")
 
-st.markdown("### Sub x Cons Trend by Region")
 # Ensure Cons MRR is numeric
-df_region['Cons MRR'] = pd.to_numeric(df_region.get('Cons MRR'), errors='coerce')
+df_filtered['Cons MRR'] = pd.to_numeric(df_filtered.get('Cons MRR'), errors='coerce')
 # Group by Month and aggregate Sub MRR & Cons MRR
-trend_df = df_region.groupby('Month', as_index=False).agg({
+trend_df = df_filtered.groupby('Month', as_index=False).agg({
     'Sub MRR': 'sum',
     'Cons MRR': 'sum'
 }).sort_values('Month')
@@ -313,7 +377,7 @@ fig.add_trace(go.Scatter(
 
 
 fig.update_layout(
-    title=f"SUB x Cons Trend by Month ({selected_region} Region)",
+    title=f"SUB x Cons Trend by Month (Region: {selected_region}, Category: {selected_category})",
     xaxis_title="Month",
     yaxis_title="MRR (₹)",
     xaxis=dict(tickformat="%b-%Y"),
@@ -387,5 +451,115 @@ fig_director.update_layout(
 
 st.plotly_chart(fig_director, use_container_width=True)
 
+# ---- Director AM based Customer Count Trend ----
+st.markdown("### Opening vs Closing Customer Count by Director AM")
 
-# Footer
+# Prepare customer count data from the table (but filtered by Director AM)
+director_summary_data = []
+
+for i, month in enumerate(months):
+    if i == 0:
+        # For first month, we can't calculate changes
+        closing = get_closing_metrics(df_director, month)
+        churn = get_churn_details(df_director, month)
+        first_sub = get_first_sub_details(df_director, month)
+
+        opening_cx_count = closing['closing_cx_count'] + churn['count'] - first_sub['count']
+        closing_cx_count = closing['closing_cx_count']
+
+        director_summary_data.append({
+            'Month': month,
+            'Opening Cx Count': opening_cx_count,
+            'Closing Cx Count': closing_cx_count
+        })
+        continue
+
+    # For subsequent months
+    closing = get_closing_metrics(df_director, month)
+    churn = get_churn_details(df_director, month)
+    first_sub = get_first_sub_details(df_director, month)
+
+    opening_cx_count = closing['closing_cx_count'] + churn['count'] - first_sub['count']
+    closing_cx_count = closing['closing_cx_count']
+
+    director_summary_data.append({
+        'Month': month,
+        'Opening Cx Count': opening_cx_count,
+        'Closing Cx Count': closing_cx_count
+    })
+
+# Create DataFrame
+director_cx_trend = pd.DataFrame(director_summary_data)
+
+# Create plotly figure
+fig_cx_trend = go.Figure()
+
+fig_cx_trend.add_trace(go.Scatter(
+    x=director_cx_trend['Month'],
+    y=director_cx_trend['Opening Cx Count'],
+    mode='lines+markers+text',
+    name='Opening Customers',
+    line=dict(color='blue', width=2),
+    marker=dict(size=8),
+    text=director_cx_trend['Opening Cx Count'],
+    textposition='top center',
+    hovertemplate='Month: %{x|%b-%Y}<br>Opening Customers: %{y}<extra></extra>'
+))
+
+fig_cx_trend.add_trace(go.Scatter(
+    x=director_cx_trend['Month'],
+    y=director_cx_trend['Closing Cx Count'],
+    mode='lines+markers+text',
+    name='Closing Customers',
+    line=dict(color='green', width=2, dash='dot'),
+    marker=dict(size=8),
+    text=director_cx_trend['Closing Cx Count'],
+    textposition='bottom center',
+    hovertemplate='Month: %{x|%b-%Y}<br>Closing Customers: %{y}<extra></extra>'
+))
+
+fig_cx_trend.update_layout(
+    title=f"Customer Count Trend for Director AM: {selected_director}",
+    xaxis_title="Month",
+    yaxis_title="Customer Count",
+    xaxis=dict(tickformat="%b-%Y"),
+    hovermode='x unified',
+    template='plotly_white',
+    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+    margin=dict(l=20, r=20, t=60, b=20)
+)
+
+st.plotly_chart(fig_cx_trend, use_container_width=True)
+
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #f5f7fa;
+        color: #2c3e50;
+    }
+
+    h1, h2, h3 {
+        color: #1f3a93;
+    }
+
+    div[data-testid="metric-container"] {
+        background-color: #ffffff;
+        color: #2c3e50;
+        border-radius: 12px;
+        padding: 1rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #dcdde1;
+    }
+
+    .stButton>button {
+        background-color: #34495e;
+        color: white;
+        border-radius: 6px;
+    }
+
+    .stButton>button:hover {
+        background-color: #5d6d7e;
+        color: white;
+    }
+    </style>
+""", unsafe_allow_html=True)
