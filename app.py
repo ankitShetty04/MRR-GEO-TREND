@@ -622,7 +622,7 @@ elif page == "Director AM Analysis":
     st.plotly_chart(fig_cx_trend, use_container_width=True)
 
     # ---- Director AM based MRR Trend ----
-    st.markdown("### Opening vs Closing MRR by Director AM")
+    st.markdown("### Opening vs Closing Sub-MRR by Director AM")
 
     # Prepare MRR data from the table (filtered by Director AM)
     director_mrr_data = []
@@ -689,7 +689,7 @@ elif page == "Director AM Analysis":
     ))
 
     fig_mrr_trend.update_layout(
-        title=f"MRR Trend for Director AM: {selected_director}",
+        title=f"Sub MRR Trend for Director AM: {selected_director}",
         xaxis_title="Month",
         yaxis_title="MRR (₹)",
         xaxis=dict(tickformat="%b-%Y"),
